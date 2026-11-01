@@ -1,0 +1,39 @@
+# remote-bridge: 远程会话桥接插件
+#
+# mode: both | server | client | off
+#   server — 本机作为服务端，向其它 DSH 暴露本地会话记录
+#   client — 本机作为客户端，把远程 DSH 的会话镜像到本机 Web UI
+#
+# 配置方式（二选一）：
+#   1. 侧边栏「插件」→「已安装插件」→「查看 dsh-remote-bridge」→「配置」，
+#      表单保存后会写入本 profile 的 cordis.patch.yml；
+#   2. 直接改本文件里 remote-bridge 行的 config（下面的默认值）。
+# 改完需要重载插件才生效：在插件页关闭再启用本插件，或重启 DSH（dsh --profile web）。
+- insert:
+    - id: remote-bridge
+      name: dsh-remote-bridge
+      config:
+        mode: both
+        server:
+          enabled: true
+          # 监听地址：0.0.0.0 允许局域网访问；只本机用 127.0.0.1
+          host: 0.0.0.0
+          port: 4590
+          # 服务端鉴权：token / password 留空表示不验证（不建议）
+          auth: {}
+          # 允许被读取的会话：'*' 表示全部；cwdPrefixes 限定工作目录前缀
+          allow:
+            sessions: '*'
+            cwdPrefixes: []
+          # 可选：按客户端发放不同 token 与其可见会话
+          clients: []
+        client:
+          enabled: true
+          # 要连接的远程机器；url 支持 http://host:port 或 ws://host:port
+          # 示例：
+          #   - id: office
+          #     label: 办公室
+          #     url: http://192.168.1.20:4590
+          #     token: 'shared-secret'
+          remotes: []
+
