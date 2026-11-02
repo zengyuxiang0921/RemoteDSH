@@ -94,6 +94,12 @@ export const Config = z?.object({
         .default({}),
       allow: scopeSchema().default({}),
       clients: z.array(clientGrant).default([]),
+      relay: z
+        .object({
+          enabled: z.boolean().default(false),
+          maxRelaySessions: z.number().step(1).min(1).max(1000).default(200),
+        })
+        .default({}),
     })
     .default({})
     .volatile(),
@@ -101,6 +107,19 @@ export const Config = z?.object({
     .object({
       enabled: z.boolean().default(true),
       remotes: z.array(remoteEntry).default([]),
+      share: z
+        .object({
+          enabled: z.boolean().default(false),
+          sessions: z.string().default('*'),
+          cwdPrefixes: z.array(z.string()).default([]),
+          consumers: z.array(z.string()).default([]),
+        })
+        .default({}),
+      relay: z
+        .object({
+          enabled: z.boolean().default(false),
+        })
+        .default({}),
     })
     .default({})
     .volatile(),

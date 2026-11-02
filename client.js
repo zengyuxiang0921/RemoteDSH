@@ -88,6 +88,22 @@ window.__ModuleLoader__.load({
         noStatus: '管理接口暂不可用，请重启 DSH 以加载新版本',
         localMachine: '本机',
         protocol: '协议',
+        serverRelay: '允许客户端之间转发会话',
+        serverRelayHint: '开启后，一台客户端共享的会话可以由其他客户端经本机读取；是否共享、共享给谁由共享方自己决定',
+        shareSection: '会话共享（经服务器转发）',
+        shareEnabled: '把本机会话共享给其他客户端',
+        shareHint: '需要服务端开启「允许客户端之间转发会话」，且双方握手都协商到 relay 能力',
+        shareSessions: '共享的会话',
+        shareCwdPrefixes: '共享的工作目录',
+        shareConsumers: '允许哪些客户端查看',
+        shareConsumersHint: '每行一个客户端机器名；留空表示任何已通过鉴权的客户端都能看',
+        clientRelay: '查看其他客户端共享的会话',
+        clientRelayHint: '开启后，本机会把对方共享的会话镜像成工作区里的会话（只读）',
+        features: '能力',
+        publishedSessions: '共享会话',
+        relayServed: '转发服务',
+        relayPeers: '转发源',
+        relayNone: '没有客户端共享会话',
       },
       en: {
         title: 'Remote bridge configuration',
@@ -162,6 +178,22 @@ window.__ModuleLoader__.load({
         noStatus: 'The management API is unavailable; restart DSH to load the new version',
         localMachine: 'This machine',
         protocol: 'Protocol',
+        serverRelay: 'Allow clients to relay sessions to each other',
+        serverRelayHint: 'When on, a session one client shares can be read by other clients through this machine; what is shared and with whom stays under the sharing client’s control',
+        shareSection: 'Session sharing (relayed through the server)',
+        shareEnabled: 'Share this machine’s sessions with other clients',
+        shareHint: 'The server must allow relaying, and both handshakes must negotiate the relay capabilities',
+        shareSessions: 'Sessions to share',
+        shareCwdPrefixes: 'Working directories to share',
+        shareConsumers: 'Clients allowed to read them',
+        shareConsumersHint: 'One client machine name per line; empty lets any authenticated client read them',
+        clientRelay: 'Read sessions other clients share',
+        clientRelayHint: 'Mirrors their shared sessions into this workspace, read-only',
+        features: 'Capabilities',
+        publishedSessions: 'Shared',
+        relayServed: 'Relayed reads',
+        relayPeers: 'Relay sources',
+        relayNone: 'No client shares sessions',
       },
     }
 
@@ -353,6 +385,9 @@ window.__ModuleLoader__.load({
             h('span', null, `${t('duration')}：${formatDuration(peer.connectedAt, snapshot.at)}`),
             h('span', null, `${t('lastActive')}：${formatTime(peer.lastActiveAt)}`),
             h('span', null, `${t('historyReads')}：${peer.historyReads}`),
+            h('span', null, `${t('features')}：${(peer.features ?? []).join(', ') || '—'}`),
+            h('span', null, `${t('publishedSessions')}：${peer.publishedSessions ?? 0}`),
+            h('span', null, `${t('relayServed')}：${peer.relayServed ?? 0}`),
           ),
           h(
             'div',
@@ -390,6 +425,20 @@ window.__ModuleLoader__.load({
                   snapshot.server?.listening ? t('listening') : t('notListening'),
                 ),
                 snapshot.server?.enabled ? h('span', null, `${snapshot.server.host}:${snapshot.server.port}`) : null,
+                snapshot.server?.enabled
+                  ? h(
+                      'span',
+                      { className: `rdcfg-badge ${snapshot.server.relay?.enabled ? 'online' : ''}` },
+                      `${t('serverRelay')}：${snapshot.server.relay?.enabled ? '开' : '关'}`,
+                    )
+                  : null,
+                snapshot.server?.relay?.enabled
+                  ? h(
+                      'span',
+                      null,
+                      `${t('relayPeers')}：${snapshot.server.relay.publishers} · ${t('publishedSessions')}：${snapshot.server.relay.publishedSessions}`,
+                    )
+                  : null,
               ),
               h('div', { className: 'rdcfg-subsection', key: 'in-title' }, `${t('inbound')}（${snapshot.server?.peers?.length ?? 0}）`),
               ...(snapshot.server?.peers?.length ? snapshot.server.peers.map(peerRow) : [h('div', { className: 'rdcfg-empty', key: 'no-peers' }, t('noPeers'))]),
@@ -412,6 +461,13 @@ window.__ModuleLoader__.load({
                         h('span', null, `${t('visibleSessions')}：${link.sessions}`),
                         h('span', null, `${t('connectedAt')}：${formatTime(link.connectedAt)}`),
                         h('span', null, `${t('lastActive')}：${formatTime(link.lastActiveAt)}`),
+                        h('span', null, `${t('features')}：${(link.features ?? []).join(', ') || '—'}`),
+                        h('span', null, `${t('publishedSessions')}：${link.publishing ?? 0}`),
+                        h(
+                          'span',
+                          null,
+                          `${t('relayPeers')}：${(link.relays ?? []).length === 0 ? t('relayNone') : (link.relays ?? []).map((entry) => `${entry.name}(${entry.sessions})`).join('、')}`,
+                        ),
                       ),
                       link.error ? h('div', { className: 'rdcfg-status err' }, link.error) : null,
                     ),
@@ -488,27 +544,32 @@ window.__ModuleLoader__.load({
         setStatus(null)
         try {
           const ops = []
-          for (const path of [['mode'], ['server', 'enabled'], ['server', 'host'], ['server', 'port'], ['server', 'name']]) {
+          const edits = [
+            ['mode'],
+            ['server', 'enabled'],
+            ['server', 'host'],
+            ['server', 'port'],
+            ['server', 'name'],
+            ['server', 'allow', 'sessions'],
+            ['server', 'allow', 'cwdPrefixes'],
+            ['server', 'relay', 'enabled'],
+            ['client', 'enabled'],
+            ['client', 'share', 'enabled'],
+            ['client', 'share', 'sessions'],
+            ['client', 'share', 'cwdPrefixes'],
+            ['client', 'share', 'consumers'],
+            ['client', 'relay', 'enabled'],
+            ['client', 'remotes'],
+          ]
+          for (const path of edits) {
             const next = pick(draft, path, undefined)
-            if (next !== undefined && !same(next, pick(original, path, undefined))) ops.push({ op: 'set', path, value: next })
+            if (next === undefined) continue
+            if (same(next, pick(original, path, undefined))) continue
+            ops.push({ op: 'set', path, value: next })
           }
           for (const key of ['token', 'password']) {
             const next = pick(draft, ['server', 'auth', key], '')
             if (typeof next === 'string' && next !== '') ops.push({ op: 'set', path: ['server', 'auth', key], value: next })
-          }
-          if (!same(pick(draft, ['server', 'allow', 'sessions'], '*'), pick(original, ['server', 'allow', 'sessions'], '*'))) {
-            ops.push({ op: 'set', path: ['server', 'allow', 'sessions'], value: pick(draft, ['server', 'allow', 'sessions'], '*') })
-          }
-          const prefixes = pick(draft, ['server', 'allow', 'cwdPrefixes'], [])
-          if (!same(prefixes, pick(original, ['server', 'allow', 'cwdPrefixes'], []))) {
-            ops.push({ op: 'set', path: ['server', 'allow', 'cwdPrefixes'], value: prefixes })
-          }
-          if (!same(pick(draft, ['client', 'enabled'], true), pick(original, ['client', 'enabled'], true))) {
-            ops.push({ op: 'set', path: ['client', 'enabled'], value: pick(draft, ['client', 'enabled'], true) })
-          }
-          const remotes = pick(draft, ['client', 'remotes'], [])
-          if (!same(remotes, pick(original, ['client', 'remotes'], []))) {
-            ops.push({ op: 'set', path: ['client', 'remotes'], value: remotes })
           }
           if (ops.length === 0) {
             setPhase('ready')
@@ -646,6 +707,13 @@ window.__ModuleLoader__.load({
               }),
               h('span', { className: 'rdcfg-hint' }, t('cwdPrefixesHint')),
             ),
+            h(CheckField, {
+              label: t('serverRelay'),
+              checked: pick(draft, ['server', 'relay', 'enabled'], false),
+              disabled,
+              onChange: (next) => update(['server', 'relay', 'enabled'], next),
+            }),
+            h('span', { className: 'rdcfg-hint' }, t('serverRelayHint')),
           ),
           h(
             'div',
@@ -720,6 +788,66 @@ window.__ModuleLoader__.load({
               },
               t('addRemote'),
             ),
+            h('div', { className: 'rdcfg-section-title', style: { marginTop: '6px' } }, t('shareSection')),
+            h(CheckField, {
+              label: t('shareEnabled'),
+              checked: pick(draft, ['client', 'share', 'enabled'], false),
+              disabled,
+              onChange: (next) => update(['client', 'share', 'enabled'], next),
+            }),
+            h('span', { className: 'rdcfg-hint' }, t('shareHint')),
+            h(TextField, {
+              label: t('shareSessions'),
+              value: pick(draft, ['client', 'share', 'sessions'], '*'),
+              hint: t('sessionsHint'),
+              disabled,
+              onChange: (next) => update(['client', 'share', 'sessions'], next),
+            }),
+            h(
+              'label',
+              { className: 'rdcfg-field' },
+              h('span', { className: 'rdcfg-label' }, t('shareCwdPrefixes')),
+              h('textarea', {
+                className: 'rdcfg-textarea',
+                disabled,
+                value: (pick(draft, ['client', 'share', 'cwdPrefixes'], []) ?? []).join('\n'),
+                onChange: (event) =>
+                  update(
+                    ['client', 'share', 'cwdPrefixes'],
+                    event.target.value
+                      .split('\n')
+                      .map((line) => line.trim())
+                      .filter((line) => line !== ''),
+                  ),
+              }),
+              h('span', { className: 'rdcfg-hint' }, t('cwdPrefixesHint')),
+            ),
+            h(
+              'label',
+              { className: 'rdcfg-field' },
+              h('span', { className: 'rdcfg-label' }, t('shareConsumers')),
+              h('textarea', {
+                className: 'rdcfg-textarea',
+                disabled,
+                value: (pick(draft, ['client', 'share', 'consumers'], []) ?? []).join('\n'),
+                onChange: (event) =>
+                  update(
+                    ['client', 'share', 'consumers'],
+                    event.target.value
+                      .split('\n')
+                      .map((line) => line.trim())
+                      .filter((line) => line !== ''),
+                  ),
+              }),
+              h('span', { className: 'rdcfg-hint' }, t('shareConsumersHint')),
+            ),
+            h(CheckField, {
+              label: t('clientRelay'),
+              checked: pick(draft, ['client', 'relay', 'enabled'], false),
+              disabled,
+              onChange: (next) => update(['client', 'relay', 'enabled'], next),
+            }),
+            h('span', { className: 'rdcfg-hint' }, t('clientRelayHint')),
           ),
           h(
             'div',
