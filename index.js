@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { BridgeServer } from './lib/server.js'
 import { BridgeClient } from './lib/client.js'
 import { normalizeConfig } from './lib/protocol.js'
-
+import { BridgeAdmin, mountAdminRoutes } from './lib/admin.js'
 /**
  * Load the profile's schemastery.
  *
@@ -114,6 +114,16 @@ export const Config = z?.object({
 export function apply(ctx, rawConfig) {
   const config = normalizeConfig(rawConfig)
   const log = typeof ctx.logger === 'function' ? ctx.logger('remote-bridge') : ctx.logger
+  const admin = new BridgeAdmin()
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['connection'], (scope) => {
+      if (!mountAdminRoutes(scope, admin)) {
+        log?.info?.('远程桥接管理面板不可用（Connection Fetch 路由未就绪）')
+      }
+    })
+  } else if (!mountAdminRoutes(ctx, admin)) {
+    log?.info?.('远程桥接管理面板不可用（Connection Fetch 路由未就绪）')
+  }
 
   if (config.mode === 'off') {
     log?.info?.('远程桥接已关闭（mode: off）')
@@ -123,6 +133,7 @@ export function apply(ctx, rawConfig) {
   if (config.server.enabled) {
     ctx.effect(() => {
       const server = new BridgeServer(ctx, config.server, log)
+      admin.server = server
       server.start().catch((error) => log?.warn?.(`远程桥接服务启动失败：${String(error?.message ?? error)}`))
       return () => server.stop()
     }, 'remote-bridge: server')
@@ -130,6 +141,7 @@ export function apply(ctx, rawConfig) {
 
   if (config.client.enabled) {
     const client = new BridgeClient(ctx, config.client, log)
+    admin.client = client
     ctx.effect(() => {
       client.start()
       return () => client.stop()

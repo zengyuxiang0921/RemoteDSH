@@ -1,0 +1,14 @@
+- id: remote-bridge
+  name: dsh-remote-bridge
+  config:
+    mode: both
+    server:
+      enabled: true
+      host: 127.0.0.1
+      port: 4595
+      name: admin-panel-check
+      auth:
+        token: 'check-token'
+    client:
+      enabled: false
+      remotes: []

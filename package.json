@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-bridge",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Bridge session records between DSH instances: a server mode that exposes local sessions and a client mode that mirrors remote machines into the local Workspace list.",
   "type": "module",

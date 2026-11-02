@@ -56,6 +56,38 @@ window.__ModuleLoader__.load({
         remoteUrlHint: 'http://192.168.1.20:4590、ws://… 或 host:port',
         noConfig: '这个 profile 没有暴露本插件的配置',
         readOnly: '当前部署不允许写入配置',
+        monitor: '连接管理',
+        monitorSummary: '实时查看连入和连出的 DSH',
+        refreshStatus: '刷新状态',
+        inbound: '连入本机的 DSH',
+        outbound: '本机连出的 DSH',
+        noPeers: '当前没有 DSH 连接',
+        noLinks: '没有配置远程连接',
+        listening: '监听中',
+        notListening: '未监听',
+        online: '在线',
+        handshaking: '握手中',
+        connecting: '连接中',
+        offline: '离线',
+        denied: '鉴权失败',
+        idle: '待连接',
+        errorState: '错误',
+        unknownState: '未知',
+        address: '来源',
+        identity: '身份',
+        version: '版本',
+        connectedAt: '连接时间',
+        duration: '连接时长',
+        lastActive: '最近活动',
+        visibleSessions: '可见会话',
+        historyReads: '历史读取',
+        disconnect: '断开',
+        disconnecting: '断开中…',
+        disconnectHint: '断开后，客户端可能按自身策略自动重连',
+        statusFailed: '状态读取失败',
+        noStatus: '管理接口暂不可用，请重启 DSH 以加载新版本',
+        localMachine: '本机',
+        protocol: '协议',
       },
       en: {
         title: 'Remote bridge configuration',
@@ -98,6 +130,38 @@ window.__ModuleLoader__.load({
         remoteUrlHint: 'http://192.168.1.20:4590, ws://…, or host:port',
         noConfig: 'This profile does not expose this plugin’s configuration',
         readOnly: 'This deployment does not allow configuration writes',
+        monitor: 'Connections',
+        monitorSummary: 'Live inbound and outbound DSH connections',
+        refreshStatus: 'Refresh status',
+        inbound: 'Connected to this machine',
+        outbound: 'Outbound remote machines',
+        noPeers: 'No DSH is connected',
+        noLinks: 'No remote connection configured',
+        listening: 'Listening',
+        notListening: 'Not listening',
+        online: 'Online',
+        handshaking: 'Handshaking',
+        connecting: 'Connecting',
+        offline: 'Offline',
+        denied: 'Authentication failed',
+        idle: 'Idle',
+        errorState: 'Error',
+        unknownState: 'Unknown',
+        address: 'Address',
+        identity: 'Identity',
+        version: 'Version',
+        connectedAt: 'Connected',
+        duration: 'Duration',
+        lastActive: 'Last activity',
+        visibleSessions: 'Visible sessions',
+        historyReads: 'History reads',
+        disconnect: 'Disconnect',
+        disconnecting: 'Disconnecting…',
+        disconnectHint: 'The client may reconnect automatically',
+        statusFailed: 'Could not read connection status',
+        noStatus: 'The management API is unavailable; restart DSH to load the new version',
+        localMachine: 'This machine',
+        protocol: 'Protocol',
       },
     }
 
@@ -129,6 +193,18 @@ window.__ModuleLoader__.load({
 .rdcfg-status.ok{color:var(--dsw-alias-state-success-primary)}
 .rdcfg-status.err{color:var(--dsw-alias-state-error-primary)}
 .rdcfg-empty{color:var(--dsw-alias-label-secondary);font-size:12px}
+.rdcfg-monitor-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rdcfg-monitor-summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--dsw-alias-label-secondary)}
+.rdcfg-badge{display:inline-flex;align-items:center;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;padding:2px 8px;font-size:11px;white-space:nowrap}
+.rdcfg-badge.online{color:var(--dsw-alias-state-success-primary)}
+.rdcfg-badge.error{color:var(--dsw-alias-state-error-primary)}
+.rdcfg-peer{border-top:1px solid var(--dsw-alias-border-l1);padding-top:10px;display:flex;flex-direction:column;gap:8px}
+.rdcfg-peer-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rdcfg-peer-title{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.rdcfg-peer-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 14px;font-size:11.5px;color:var(--dsw-alias-label-secondary)}
+.rdcfg-peer-meta span{overflow-wrap:anywhere}
+.rdcfg-subsection{font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary);margin-top:2px}
+@media(max-width:480px){.rdcfg-peer-meta{grid-template-columns:1fr}}
 `
 
     /** Read a nested value with a fallback. */
@@ -206,6 +282,142 @@ window.__ModuleLoader__.load({
           },
           props.options.map((option) => h('option', { key: option.value, value: option.value }, option.label)),
         ),
+      )
+    }
+
+    function formatTime(value) {
+      return Number(value) > 0 ? new Date(Number(value)).toLocaleString() : '—'
+    }
+
+    function formatDuration(from, at) {
+      if (!Number(from) || !Number(at)) return '—'
+      const seconds = Math.max(0, Math.floor((at - from) / 1000))
+      if (seconds < 60) return `${seconds}s`
+      if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+      return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+    }
+
+    /** Live bridge connections; this is independent of form draft state. */
+    function MonitorPanel({ t, resolveAdmin }) {
+      const [snapshot, setSnapshot] = useState(null)
+      const [error, setError] = useState(null)
+      const [busy, setBusy] = useState(null)
+      const loadStatus = useCallback(async () => {
+        try {
+          const admin = resolveAdmin?.()
+          if (admin === undefined) throw new Error(t('noStatus'))
+          setSnapshot(await admin.status())
+          setError(null)
+        } catch (failure) {
+          setError(String(failure?.message ?? failure))
+        }
+      }, [resolveAdmin, t])
+      useEffect(() => {
+        loadStatus()
+        const timer = setInterval(loadStatus, 5000)
+        return () => clearInterval(timer)
+      }, [loadStatus])
+      const disconnect = async (id) => {
+        setBusy(id)
+        try {
+          const admin = resolveAdmin?.()
+          if (admin === undefined) throw new Error(t('noStatus'))
+          const result = await admin.disconnect(id)
+          if (result?.ok !== true) throw new Error(result?.error ?? 'disconnect failed')
+          await loadStatus()
+        } catch (failure) {
+          setError(String(failure?.message ?? failure))
+        } finally {
+          setBusy(null)
+        }
+      }
+      const stateLabel = (state) => t(state === 'error' ? 'errorState' : state)
+      const peerRow = (peer) =>
+        h(
+          'div',
+          { className: 'rdcfg-peer', key: peer.id },
+          h(
+            'div',
+            { className: 'rdcfg-peer-head' },
+            h('span', { className: 'rdcfg-peer-title' }, peer.name || peer.identity || peer.id),
+            h('span', { className: `rdcfg-badge ${peer.state === 'online' ? 'online' : ''}` }, stateLabel(peer.state)),
+          ),
+          h(
+            'div',
+            { className: 'rdcfg-peer-meta' },
+            h('span', null, `${t('address')}：${peer.address}${peer.port ? `:${peer.port}` : ''}`),
+            h('span', null, `${t('identity')}：${peer.identity || '—'}`),
+            h('span', null, `${t('version')}：${peer.version || '—'} · ${t('protocol')} ${peer.protocol || '—'}`),
+            h('span', null, `${t('visibleSessions')}：${peer.visibleSessions}`),
+            h('span', null, `${t('connectedAt')}：${formatTime(peer.connectedAt)}`),
+            h('span', null, `${t('duration')}：${formatDuration(peer.connectedAt, snapshot.at)}`),
+            h('span', null, `${t('lastActive')}：${formatTime(peer.lastActiveAt)}`),
+            h('span', null, `${t('historyReads')}：${peer.historyReads}`),
+          ),
+          h(
+            'div',
+            { className: 'rdcfg-actions' },
+            h(
+              'button',
+              { type: 'button', className: 'rdcfg-btn danger', disabled: busy !== null, onClick: () => disconnect(peer.id) },
+              busy === peer.id ? t('disconnecting') : t('disconnect'),
+            ),
+            h('span', { className: 'rdcfg-hint' }, t('disconnectHint')),
+          ),
+        )
+      return h(
+        'div',
+        { className: 'rdcfg-section' },
+        h(
+          'div',
+          { className: 'rdcfg-monitor-head' },
+          h('div', { className: 'rdcfg-section-title' }, t('monitor')),
+          h('button', { type: 'button', className: 'rdcfg-btn', onClick: loadStatus }, t('refreshStatus')),
+        ),
+        h('div', { className: 'rdcfg-hint' }, t('monitorSummary')),
+        error ? h('div', { className: 'rdcfg-status err' }, `${t('statusFailed')}：${error}`) : null,
+        snapshot === null
+          ? h('div', { className: 'rdcfg-empty' }, t('loading'))
+          : [
+              h(
+                'div',
+                { className: 'rdcfg-monitor-summary', key: 'summary' },
+                h('span', null, `${t('localMachine')}：${snapshot.machine?.hostname || '—'}`),
+                h('span', null, `${snapshot.machine?.platform || ''} ${snapshot.machine?.arch || ''}`),
+                h(
+                  'span',
+                  { className: `rdcfg-badge ${snapshot.server?.listening ? 'online' : 'error'}` },
+                  snapshot.server?.listening ? t('listening') : t('notListening'),
+                ),
+                snapshot.server?.enabled ? h('span', null, `${snapshot.server.host}:${snapshot.server.port}`) : null,
+              ),
+              h('div', { className: 'rdcfg-subsection', key: 'in-title' }, `${t('inbound')}（${snapshot.server?.peers?.length ?? 0}）`),
+              ...(snapshot.server?.peers?.length ? snapshot.server.peers.map(peerRow) : [h('div', { className: 'rdcfg-empty', key: 'no-peers' }, t('noPeers'))]),
+              h('div', { className: 'rdcfg-subsection', key: 'out-title' }, `${t('outbound')}（${snapshot.client?.links?.length ?? 0}）`),
+              ...(snapshot.client?.links?.length
+                ? snapshot.client.links.map((link) =>
+                    h(
+                      'div',
+                      { className: 'rdcfg-peer', key: link.id },
+                      h(
+                        'div',
+                        { className: 'rdcfg-peer-head' },
+                        h('span', { className: 'rdcfg-peer-title' }, link.serverName || link.label),
+                        h('span', { className: `rdcfg-badge ${link.status === 'online' ? 'online' : link.status === 'denied' || link.status === 'error' ? 'error' : ''}` }, stateLabel(link.status)),
+                      ),
+                      h(
+                        'div',
+                        { className: 'rdcfg-peer-meta' },
+                        h('span', null, `${t('address')}：${link.url}`),
+                        h('span', null, `${t('visibleSessions')}：${link.sessions}`),
+                        h('span', null, `${t('connectedAt')}：${formatTime(link.connectedAt)}`),
+                        h('span', null, `${t('lastActive')}：${formatTime(link.lastActiveAt)}`),
+                      ),
+                      link.error ? h('div', { className: 'rdcfg-status err' }, link.error) : null,
+                    ),
+                  )
+                : [h('div', { className: 'rdcfg-empty', key: 'no-links' }, t('noLinks'))]),
+            ],
       )
     }
 
@@ -526,7 +738,7 @@ window.__ModuleLoader__.load({
         )
       }
 
-      return h('div', { className: 'rdcfg-root' }, style, ...body)
+      return h('div', { className: 'rdcfg-root' }, style, h(MonitorPanel, { t, resolveAdmin: props.resolveAdmin }), ...body)
     }
 
     /**
@@ -562,16 +774,61 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * Lazy access to the Host management routes.
+     *
+     * They are exact owner-only Fetch routes on the Connection carrier, so a
+     * same-origin request carrying the page cookie is already authorised; the
+     * reader stays lazy so rendering never touches the network layer.
+     * @param {import('@deepseek-ai/cordis').Context} ctx - client context.
+     * @returns {{ status: () => Promise<object>, disconnect: (id: string) => Promise<object> } | undefined} client.
+     */
+    function resolveAdmin(ctx) {
+      let origin = ''
+      try {
+        origin = globalThis.location?.origin ?? ''
+      } catch {
+        origin = ''
+      }
+      if (origin === '' || typeof globalThis.fetch !== 'function') return undefined
+      const call = async (path, init) => {
+        const response = await globalThis.fetch(`${origin}${path}`, {
+          credentials: 'same-origin',
+          cache: 'no-store',
+          ...init,
+        })
+        const text = await response.text()
+        let body
+        try {
+          body = text === '' ? null : JSON.parse(text)
+        } catch {
+          throw new Error(`管理接口返回了非 JSON 响应（HTTP ${response.status}）`)
+        }
+        if (!response.ok) throw new Error(body?.error ?? `HTTP ${response.status}`)
+        return body
+      }
+      return {
+        status: () => call('/api/remoteBridge/status', { headers: { accept: 'application/json' } }),
+        disconnect: (peerId) =>
+          call('/api/remoteBridge/disconnect', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ peerId }),
+          }),
+      }
+    }
+
     return {
       inject: ['slots', 'locale'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, DICTIONARIES), 'remote-bridge: config dictionaries')
         const t = ctx.locale.bind(NS)
         const resolve = () => resolveSettings(ctx)
+        const resolveManagement = () => resolveAdmin(ctx)
         ctx.slots.inject('plugins.row.config', () =>
           ctx.slots.register(
             { name: 'plugins.row.config', key: ROW_KEY, locale: NS },
-            (props) => h(ConfigPage, { t, view: props?.view, resolve }),
+            (props) => h(ConfigPage, { t, view: props?.view, resolve, resolveAdmin: resolveManagement }),
           ),
         )
       },
