@@ -159,7 +159,12 @@ const publisher = new BridgeClient(
 publisher.start()
 
 await waitFor(async () => publisher.links[0].status === 'online', 'publisher online')
-assert.deepEqual(publisher.links[0].features.sort(), ['history.read', 'relay.publish', 'sessions.read'])
+assert.deepEqual(publisher.links[0].features.sort(), [
+  'history.read',
+  'relay.publish',
+  'relay.refresh',
+  'sessions.read',
+])
 await waitFor(async () => (publisher.links[0].publisher?.advertised.size ?? 0) > 0, 'publisher advertised')
 const advertised = [...publisher.links[0].publisher.advertised.keys()].sort()
 assert.deepEqual(advertised, ['sess-alpha'], 'only the shared directory is advertised')
@@ -222,6 +227,51 @@ const plain = new RawPeer(`ws://${base}/ws`, 'friend', ['sessions.read'], {})
 const plainWelcome = await plain.start()
 assert.deepEqual(plainWelcome.relays, [], 'relay requires the negotiated capability')
 console.log('capability gate holds for a bare subscriber')
+
+// ── a permission edit is broadcast and revokes the previous consumer ────────
+assert.ok(publisher.links[0].features.includes('relay.refresh'), 'publisher negotiates relay.refresh')
+await publisher.links[0].publisher.setShare({
+  enabled: true,
+  sessions: '*',
+  cwdPrefixes: ['D:\\work\\alpha'],
+  consumers: ['stranger'],
+})
+const revoked = await friend.next((message) => message.t === 'relay/sessions' && message.peer.id === peerId)
+assert.equal(revoked.gone, true, 'the consumer that lost access is told')
+assert.deepEqual(revoked.sessions, [])
+console.log('permission edit revoked the previous consumer')
+
+const granted = await stranger.next((message) => message.t === 'relay/sessions' && message.peer.id === peerId)
+assert.equal(granted.gone, undefined)
+assert.deepEqual(granted.sessions.map((item) => item.id), ['sess-alpha'])
+console.log('permission edit granted the new consumer')
+
+friend.send({ t: 'history', rid: 'q4', peer: peerId, session: 'sess-alpha', after: 0, max: 100 })
+const afterRevoke = await friend.next((message) => message.t === 'error' && message.rid === 'q4')
+assert.equal(afterRevoke.code, 'forbidden')
+console.log('revoked consumer refused:', afterRevoke.code)
+
+// ── a subscriber can ask the server to re-pull the catalogue ────────────────
+stranger.send({ t: 'relay/sync' })
+const synced = await stranger.next((message) => message.t === 'relay/synced')
+assert.equal(synced.publishers, 1)
+const rePulled = await stranger.next((message) => message.t === 'relay/sessions' && message.peer.id === peerId)
+assert.deepEqual(rePulled.sessions.map((item) => item.id), ['sess-alpha'])
+console.log('subscriber re-pull returned', rePulled.sessions.length, 'session(s)')
+
+// ── turning sharing off withdraws everything ────────────────────────────────
+// Drop the frames the re-pull above produced, so the next assertion cannot
+// match a catalogue that was already in flight.
+stranger.inbox = stranger.inbox.filter((message) => message.t !== 'relay/sessions')
+await publisher.links[0].publisher.setShare({
+  enabled: false,
+  sessions: '*',
+  cwdPrefixes: ['D:\\work\\alpha'],
+  consumers: ['stranger'],
+})
+const withdrawn = await stranger.next((message) => message.t === 'relay/sessions' && message.peer.id === peerId)
+assert.equal(withdrawn.gone, true, 'disabling sharing withdraws the catalogue')
+console.log('disabling sharing withdrew the catalogue')
 
 // ── protocol validation ─────────────────────────────────────────────────────
 const stale = new WebSocket(`ws://${base}/ws`)

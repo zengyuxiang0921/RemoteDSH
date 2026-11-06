@@ -104,6 +104,16 @@ window.__ModuleLoader__.load({
         relayServed: '转发服务',
         relayPeers: '转发源',
         relayNone: '没有客户端共享会话',
+        republish: '重新广播共享',
+        pull: '重新拉取共享',
+        republishDone: '已重新广播共享目录',
+        pullDone: '已重新拉取共享会话',
+        rebroadcast: '共享权限已广播',
+        actionFailed: '操作失败',
+        working: '处理中…',
+        sharedWith: '已授权给',
+        lastPublish: '最近广播',
+        publishCount: '广播次数',
       },
       en: {
         title: 'Remote bridge configuration',
@@ -194,6 +204,16 @@ window.__ModuleLoader__.load({
         relayServed: 'Relayed reads',
         relayPeers: 'Relay sources',
         relayNone: 'No client shares sessions',
+        republish: 'Re-broadcast share',
+        pull: 'Re-pull shared',
+        republishDone: 'Share catalogue re-broadcast',
+        pullDone: 'Shared sessions re-pulled',
+        rebroadcast: 'share scope broadcast',
+        actionFailed: 'Action failed',
+        working: 'Working…',
+        sharedWith: 'Granted to',
+        lastPublish: 'Last broadcast',
+        publishCount: 'Broadcasts',
       },
     }
 
@@ -334,6 +354,8 @@ window.__ModuleLoader__.load({
       const [snapshot, setSnapshot] = useState(null)
       const [error, setError] = useState(null)
       const [busy, setBusy] = useState(null)
+      const [notice, setNotice] = useState(null)
+      const [actionError, setActionError] = useState(null)
       const loadStatus = useCallback(async () => {
         try {
           const admin = resolveAdmin?.()
@@ -351,6 +373,7 @@ window.__ModuleLoader__.load({
       }, [loadStatus])
       const disconnect = async (id) => {
         setBusy(id)
+        setActionError(null)
         try {
           const admin = resolveAdmin?.()
           if (admin === undefined) throw new Error(t('noStatus'))
@@ -358,12 +381,29 @@ window.__ModuleLoader__.load({
           if (result?.ok !== true) throw new Error(result?.error ?? 'disconnect failed')
           await loadStatus()
         } catch (failure) {
-          setError(String(failure?.message ?? failure))
+          setActionError(String(failure?.message ?? failure))
         } finally {
           setBusy(null)
         }
       }
       const stateLabel = (state) => t(state === 'error' ? 'errorState' : state)
+      const runAction = async (action, okText) => {
+        setBusy(action)
+        setNotice(null)
+        setActionError(null)
+        try {
+          const admin = resolveAdmin?.()
+          if (admin === undefined) throw new Error(t('noStatus'))
+          const result = action === 'republish' ? await admin.republish() : await admin.pull()
+          if (result?.ok !== true) throw new Error(result?.error ?? 'failed')
+          setNotice(`${okText}（${result.links} 条连接）`)
+          await loadStatus()
+        } catch (failure) {
+          setActionError(String(failure?.message ?? failure))
+        } finally {
+          setBusy(null)
+        }
+      }
       const peerRow = (peer) =>
         h(
           'div',
@@ -387,6 +427,9 @@ window.__ModuleLoader__.load({
             h('span', null, `${t('historyReads')}：${peer.historyReads}`),
             h('span', null, `${t('features')}：${(peer.features ?? []).join(', ') || '—'}`),
             h('span', null, `${t('publishedSessions')}：${peer.publishedSessions ?? 0}`),
+            h('span', null, `${t('sharedWith')}：${peer.sharedWith ?? 0}`),
+            h('span', null, `${t('publishCount')}：${peer.publishCount ?? 0}`),
+            h('span', null, `${t('lastPublish')}：${formatTime(peer.lastPublishAt)}`),
             h('span', null, `${t('relayServed')}：${peer.relayServed ?? 0}`),
           ),
           h(
@@ -407,9 +450,25 @@ window.__ModuleLoader__.load({
           'div',
           { className: 'rdcfg-monitor-head' },
           h('div', { className: 'rdcfg-section-title' }, t('monitor')),
-          h('button', { type: 'button', className: 'rdcfg-btn', onClick: loadStatus }, t('refreshStatus')),
+          h(
+            'div',
+            { className: 'rdcfg-actions' },
+            h(
+              'button',
+              { type: 'button', className: 'rdcfg-btn', disabled: busy !== null, onClick: () => runAction('republish', t('republishDone')) },
+              busy === 'republish' ? t('working') : t('republish'),
+            ),
+            h(
+              'button',
+              { type: 'button', className: 'rdcfg-btn', disabled: busy !== null, onClick: () => runAction('pull', t('pullDone')) },
+              busy === 'pull' ? t('working') : t('pull'),
+            ),
+            h('button', { type: 'button', className: 'rdcfg-btn', disabled: busy !== null, onClick: loadStatus }, t('refreshStatus')),
+          ),
         ),
         h('div', { className: 'rdcfg-hint' }, t('monitorSummary')),
+        notice === null ? null : h('div', { className: 'rdcfg-status ok' }, notice),
+        actionError === null ? null : h('div', { className: 'rdcfg-status err' }, `${t('actionFailed')}：${actionError}`),
         error ? h('div', { className: 'rdcfg-status err' }, `${t('statusFailed')}：${error}`) : null,
         snapshot === null
           ? h('div', { className: 'rdcfg-empty' }, t('loading'))
@@ -463,6 +522,8 @@ window.__ModuleLoader__.load({
                         h('span', null, `${t('lastActive')}：${formatTime(link.lastActiveAt)}`),
                         h('span', null, `${t('features')}：${(link.features ?? []).join(', ') || '—'}`),
                         h('span', null, `${t('publishedSessions')}：${link.publishing ?? 0}`),
+                        h('span', null, `${t('publishCount')}：${link.publishCount ?? 0}`),
+                        h('span', null, `${t('lastPublish')}：${formatTime(link.lastPublishAt)}`),
                         h(
                           'span',
                           null,
@@ -542,6 +603,8 @@ window.__ModuleLoader__.load({
         if (draft === null || namespace === null) return
         setPhase('saving')
         setStatus(null)
+        const shareChanged = !same(pick(draft, ['client', 'share'], {}), pick(original, ['client', 'share'], {}))
+        const shareScope = pick(draft, ['client', 'share'], {})
         try {
           const ops = []
           const edits = [
@@ -587,6 +650,17 @@ window.__ModuleLoader__.load({
           setRevision(Number(view?.revision) || revision + 1)
           setPhase('ready')
           setStatus({ kind: 'ok', text: t('saved') })
+          // A permission edit is announced to the server right away, so peers
+          // converge now instead of waiting for the next plugin restart.
+          if (shareChanged) {
+            try {
+              const admin = props.resolveAdmin?.()
+              const announced = await admin?.republish(shareScope)
+              if (announced?.ok === true) setStatus({ kind: 'ok', text: `${t('saved')}·${t('rebroadcast')}` })
+            } catch {
+              // the periodic refresh still converges; a failed push is not fatal
+            }
+          }
         } catch (failure) {
           setPhase('ready')
           setStatus({ kind: 'err', text: `${t('saveFailed')}：${String(failure?.message ?? failure)}` })
@@ -943,6 +1017,8 @@ window.__ModuleLoader__.load({
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ peerId }),
           }),
+        republish: (share) => call('/api/remoteBridge/republish', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(share === undefined ? {} : { share }) }),
+        pull: () => call('/api/remoteBridge/pull', { method: 'POST' }),
       }
     }
 
